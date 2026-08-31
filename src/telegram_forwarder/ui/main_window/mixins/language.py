@@ -8,7 +8,13 @@ COLOR_ERROR = '#ffaa00'
 
 class LanguageMixin:
     def _on_lang_changed(self, index):
-        set_lang('pt' if 'PT-BR' in self.ui.combo_lang.currentText() else 'en')
+        # índice 0 = 🇺🇸 EN, 1 = 🇧🇷 PT-BR  — usa índice para suportar bandeirinha sem depender do texto
+        if index < 0:
+            # fallback caso sinal emitido sem índice válido (texto com emoji)
+            txt = self.ui.combo_lang.currentText()
+            set_lang('pt' if 'PT-BR' in txt else 'en')
+        else:
+            set_lang('en' if index == 0 else 'pt')
         self.apply_language()
 
     def apply_language(self):
