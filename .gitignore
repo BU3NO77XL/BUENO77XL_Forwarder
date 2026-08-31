@@ -1,0 +1,39 @@
+# ============================================================
+# Seguranca — NUNCA commitar credenciais
+# ============================================================
+.env
+config/proxy.txt
+proxy.txt
+
+# Sessoes e dados de contas (runtime)
+account/*
+!account/.gitkeep
+data/*
+!data/.gitkeep
+delete/*
+!delete/.gitkeep
+downloads/*
+!downloads/.gitkeep
+
+# Logs
+app.log
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

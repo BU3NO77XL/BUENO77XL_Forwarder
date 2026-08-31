@@ -1,0 +1,68 @@
+# ============================================================
+# pyproject.toml — gerenciado com uv (https://docs.astral.sh/uv/)
+#
+# Uso:
+#   uv sync                          # cria .venv e instala tudo
+#   uv run python main.py            # roda a GUI (shim na raiz)
+#   uv run python -m telegram_forwarder  # roda a GUI (pacote)
+#   uv run tg-forwarder              # entry-point console
+#   uv run tg-daemon                 # daemon headless
+# ============================================================
+
+[project]
+name = "telegram-restricted-content-forwarder"
+version = "2.0.0"
+description = "GUI + Daemon para encaminhar posts de canais restritos do Telegram, com deteccao de apenas novas mensagens."
+readme = "README.md"
+# Python 3.10-3.12: compatível com macOS Catalina (10.15) e PyQt6
+requires-python = ">=3.10,<3.13"
+# kurigram é um fork do pyrogram; o módulo importável é `pyrogram`
+dependencies = [
+    # macOS Catalina (10.15): Qt 6.5+ exige macOS 11+, por isso pin antigo só no darwin.
+    # No Windows/Linux usamos versões recentes: PyQt6 6.4.2 + PyQt6-sip 13.12+
+    # causa access violation (segfault) em classes com herança múltipla (mixin + QWidget).
+    "PyQt6==6.4.2; sys_platform == 'darwin'",
+    "pyqt6-qt6==6.4.2; sys_platform == 'darwin'",
+    "PyQt6>=6.7; sys_platform != 'darwin'",
+    "pyqt6-qt6>=6.7; sys_platform != 'darwin'",
+    "qasync>=0.27",
+    "psutil>=5.9",
+    "aiohttp>=3.9",      # usado apenas para checar proxies (não é gargalo)
+    "kurigram>=1.0",     # fork do pyrogram (import: from pyrogram import Client)
+    # "tgcrypto>=1.2",   # OPCIONAL: acelera criptografia, mas exige Microsoft C++ Build Tools no Windows
+                        # kurigram/pyrogram funciona sem ele (fallback puro-python, só um pouco mais lento)
+                        # Para instalar depois: pip install tgcrypto  (com Build Tools) ou uv pip install tgcrypto
+]
+
+[project.optional-dependencies]
+# deps apenas para o daemon na VPS (sem GUI)
+daemon = [
+    "psutil>=5.9",
+    "aiohttp>=3.9",
+    "kurigram>=1.0",
+    "tgcrypto>=1.2",
+]
+# aceleração opcional de criptografia (requer compilador C++ no Windows)
+speedup = [
+    "tgcrypto>=1.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+tg-forwarder = "telegram_forwarder.app:main"
+tg-daemon = "telegram_forwarder.daemon.daemon:main"
+tg-seed = "telegram_forwarder.daemon.seed:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/telegram_forwarder"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
