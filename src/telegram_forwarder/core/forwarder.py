@@ -201,6 +201,33 @@ async def get_message_safe(cli, chat_id, message_id, log=print):
         return None
 
 
+async def _download_safe(m, timeout=180, retries=3, log=print):
+    """Baixa mídia com timeout e retry para evitar 'upload.GetFile timed out'."""
+    for attempt in range(1, retries + 1):
+        try:
+            # m.download já tem retry interno, mas envolvemos com wait_for para timeout maior
+            path = await asyncio.wait_for(m.download(), timeout=timeout)
+            if path and os.path.exists(path):
+                return path
+            if path is None and attempt < retries:
+                log(f"Download retornou None id={getattr(m, 'id', '?')} tentativa {attempt}/{retries}")
+                await asyncio.sleep(2 * attempt)
+                continue
+            if path:
+                return path
+        except asyncio.TimeoutError:
+            log(f"Timeout baixando mídia id={getattr(m, 'id', '?')} tentativa {attempt}/{retries}")
+            await asyncio.sleep(2 * attempt)
+        except Exception as e:
+            # Timeout de rede do pyrogram vem como Exception com 'timed out'
+            if 'timed out' in str(e).lower() and attempt < retries:
+                log(f"Retrying download id={getattr(m, 'id', '?')} ({attempt}/{retries}): {e}")
+                await asyncio.sleep(3 * attempt)
+                continue
+            raise
+    raise asyncio.TimeoutError(f"Falha ao baixar mídia id={getattr(m, 'id', '?')} após {retries} tentativas")
+
+
 async def send_one(cli, dest_chat_id, m):
     """Envia uma mensagem tratando todos os tipos de midia."""
     # service/empty não podem ser copiados
@@ -214,16 +241,20 @@ async def send_one(cli, dest_chat_id, m):
             disable_web_page_preview=True
         )
     elif m.photo:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_photo(
             chat_id=dest_chat_id,
             photo=path,
             caption=m.caption,
             caption_entities=m.caption_entities,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     elif m.video:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_video(
             chat_id=dest_chat_id,
             video=path,
@@ -233,18 +264,26 @@ async def send_one(cli, dest_chat_id, m):
             width=m.video.width,
             height=m.video.height,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     elif m.document:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_document(
             chat_id=dest_chat_id,
             document=path,
             caption=m.caption,
             caption_entities=m.caption_entities,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     elif m.audio:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_audio(
             chat_id=dest_chat_id,
             audio=path,
@@ -254,9 +293,13 @@ async def send_one(cli, dest_chat_id, m):
             performer=m.audio.performer,
             title=m.audio.title,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     elif m.animation:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_animation(
             chat_id=dest_chat_id,
             animation=path,
@@ -266,9 +309,13 @@ async def send_one(cli, dest_chat_id, m):
             width=m.animation.width,
             height=m.animation.height,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     elif m.voice:
-        path = await m.download()
+        path = await _download_safe(m)
         await cli.send_voice(
             chat_id=dest_chat_id,
             voice=path,
@@ -276,7 +323,11 @@ async def send_one(cli, dest_chat_id, m):
             caption_entities=m.caption_entities,
             duration=m.voice.duration,
         )
-        os.remove(path)
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
     else:
         await m.copy(dest_chat_id)
 

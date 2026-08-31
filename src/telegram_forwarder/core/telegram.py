@@ -159,7 +159,13 @@ class telegram_panel:
         except ValueError as e:
             return {'status': False, 'message': str(e)}
         proxy = await telegram_panel.get_proxy()
-        cli = Client(str(ACCOUNT_DIR / phone), api_id, api_hash, proxy=proxy[0])
+        cli = Client(
+            str(ACCOUNT_DIR / phone), api_id, api_hash,
+            proxy=proxy[0],
+            sleep_threshold=60,  # evita timeout prematuro em upload.GetFile
+            max_concurrent_transmissions=2,
+            workers=8
+        )
         try:
             await cli.connect()
             result = await cli.send_code(phone)
