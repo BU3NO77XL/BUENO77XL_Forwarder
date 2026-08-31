@@ -84,54 +84,33 @@ class Ui_MainWindow(object):
 "    QComboBox::down-arrow {\n"
 "        image: url(:/icons/down-arrow.png);\n"
 "    }\n"
-"    /* Alternador de idioma — minimalista, sem fundo, com bandeirinha */\n"
-"    QComboBox#combo_lang, QComboBox#combo_lang:!editable, QComboBox#combo_lang:!editable:on {\n"
+"    /* Alternador de idioma — botão toggle minimalista, sem fundo, sem dropdown */\n"
+"    QPushButton#combo_lang {\n"
 "        background-color: transparent;\n"
 "        background: transparent;\n"
 "        border: none;\n"
 "        border-radius: 6px;\n"
-"        padding: 2px 6px;\n"
+"        padding: 4px 10px;\n"
 "        color: #8a8a8a;\n"
 "        font-size: 9pt;\n"
 "        font-weight: 500;\n"
 "        font-family: 'Segoe UI Emoji', 'Segoe UI', sans-serif;\n"
 "        min-width: 82px;\n"
-"        max-width: 104px;\n"
+"        max-width: 110px;\n"
+"        text-align: left;\n"
 "    }\n"
-"    QComboBox#combo_lang:hover {\n"
+"    QPushButton#combo_lang:hover {\n"
 "        background-color: rgba(255, 255, 255, 0.06);\n"
 "        background: rgba(255, 255, 255, 0.06);\n"
 "        color: #e0e0e0;\n"
 "    }\n"
-"    QComboBox#combo_lang:focus, QComboBox#combo_lang:on {\n"
+"    QPushButton#combo_lang:pressed {\n"
+"        background-color: rgba(255, 255, 255, 0.10);\n"
+"        color: #ffffff;\n"
+"    }\n"
+"    QPushButton#combo_lang:focus {\n"
 "        border: none;\n"
-"        background-color: rgba(255, 255, 255, 0.06);\n"
-"        background: rgba(255, 255, 255, 0.06);\n"
-"    }\n"
-"    QComboBox#combo_lang::drop-down {\n"
-"        border: none;\n"
-"        width: 14px;\n"
-"        background: transparent;\n"
-"        background-color: transparent;\n"
-"    }\n"
-"    QComboBox#combo_lang::down-arrow {\n"
-"        width: 0;\n"
-"        height: 0;\n"
-"        border-left: 4px solid transparent;\n"
-"        border-right: 4px solid transparent;\n"
-"        border-top: 5px solid #777;\n"
-"        margin-right: 6px;\n"
-"        margin-top: 2px;\n"
-"        image: none;\n"
-"    }\n"
-"    QComboBox#combo_lang QAbstractItemView {\n"
-"        background-color: #2b2b2b;\n"
-"        color: #e0e0e0;\n"
-"        border: 1px solid #444;\n"
-"        selection-background-color: #357abd;\n"
-"        selection-color: white;\n"
-"        outline: 0;\n"
-"        padding: 2px;\n"
+"        outline: none;\n"
 "    }\n"
 "    /* FIX Windows: popups brancos e viewport branco */\n"
     "    QComboBox QAbstractItemView, QListView, QListWidget {\n"
@@ -237,12 +216,13 @@ class Ui_MainWindow(object):
         self.headerLayout.setObjectName("headerLayout")
         spacerItemHeader = QtWidgets.QSpacerItem(40, 10, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
         self.headerLayout.addItem(spacerItemHeader)
-        self.combo_lang = QtWidgets.QComboBox(parent=self.centralwidget)
+        self.combo_lang = QtWidgets.QPushButton(parent=self.centralwidget)
         self.combo_lang.setObjectName("combo_lang")
         self.combo_lang.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
         self.combo_lang.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.combo_lang.setToolTip("Language / Idioma")
-        self.combo_lang.setMaximumWidth(102)
+        self.combo_lang.setToolTip("Language / Idioma — clique para alternar")
+        self.combo_lang.setFlat(True)
+        self.combo_lang.setMaximumWidth(110)
         self.combo_lang.setMinimumWidth(88)
         self.headerLayout.addWidget(self.combo_lang)
         self.mainLayout.addLayout(self.headerLayout)
@@ -460,4 +440,4 @@ class Ui_MainWindow(object):
         self.tab_account.setTabText(self.tab_account.indexOf(self.ForwardTab), _translate("MainWindow", "   Forward Messages   "))
         self.btn_pick_source.setText(_translate("MainWindow", "+"))
         self.btn_pick_dest.setText(_translate("MainWindow", "+"))
-        self.combo_lang.addItems([_translate("MainWindow", "EN"), _translate("MainWindow", "PT-BR")])
+        self.combo_lang.setText(_translate("MainWindow", "EN"))

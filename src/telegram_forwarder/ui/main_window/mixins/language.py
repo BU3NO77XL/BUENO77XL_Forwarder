@@ -7,14 +7,10 @@ COLOR_STOPPED = '#ff5555'
 COLOR_ERROR = '#ffaa00'
 
 class LanguageMixin:
-    def _on_lang_changed(self, index):
-        # índice 0 = 🇺🇸 EN, 1 = 🇧🇷 PT-BR  — usa índice para suportar bandeirinha sem depender do texto
-        if index < 0:
-            # fallback caso sinal emitido sem índice válido (texto com emoji)
-            txt = self.ui.combo_lang.currentText()
-            set_lang('pt' if 'PT-BR' in txt else 'en')
-        else:
-            set_lang('en' if index == 0 else 'pt')
+    def _on_lang_changed(self, *args):
+        """Toggle sem dropdown: cada clique alterna PT-BR <-> EN."""
+        # clique no botão -> alterna
+        set_lang('pt' if get_lang() == 'en' else 'en')
         self.apply_language()
 
     def apply_language(self):
@@ -47,9 +43,17 @@ class LanguageMixin:
         self.ui.forward_log.setPlaceholderText(t('ph_log'))
         self.ui.btn_pick_source.setToolTip(t('tooltip_pick'))
         self.ui.btn_pick_dest.setToolTip(t('tooltip_pick'))
-        idx = 0 if get_lang() == 'en' else 1
-        if self.ui.combo_lang.currentIndex() != idx:
-            self.ui.combo_lang.setCurrentIndex(idx)
+        # botão toggle: mostra idioma atual com bandeirinha
+        try:
+            cur = get_lang()
+            txt = "PT-BR" if cur == "pt" else "EN"
+            self.ui.combo_lang.setText(txt)
+            # ícone já criado em window._setup_lang_icons
+            if hasattr(self, "_lang_icons") and cur in getattr(self, "_lang_icons", {}):
+                self.ui.combo_lang.setIcon(self._lang_icons[cur])
+            self.ui.combo_lang.setToolTip(t('tooltip_lang') + " — clique para alternar")
+        except Exception:
+            pass
         self.update_sync_label()
         cur = self.ui.lbl_status.text()
         if 'Active' in cur or 'Ativo' in cur:
