@@ -53,8 +53,10 @@ def normalize_channel(text: str) -> str:
 class State:
     """Estado persistente: ultima mensagem enviada por (conta, canal de origem)."""
 
-    def __init__(self, path: str = STATE_FILE):
-        self.path = path
+    def __init__(self, path=None):
+        from pathlib import Path as _Path
+        # STATE_FILE é Path; aceita str|Path e normaliza para Path
+        self.path = _Path(path) if path is not None else _Path(STATE_FILE)
         self._data = {}
         self._load()
 
@@ -67,11 +69,13 @@ class State:
 
     def _save(self):
         try:
-            os.makedirs(os.path.dirname(self.path) or '.', exist_ok=True)
-            tmp = self.path + '.tmp'
+            from pathlib import Path as _Path
+            p = _Path(self.path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _Path(str(p) + '.tmp')
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, self.path)  # gravacao atomica
+            os.replace(tmp, p)  # gravacao atomica
         except Exception as e:
             print('[state] save error: {}'.format(e))
 
@@ -157,23 +161,24 @@ async def fetch_new_ids(cli, chat_id, last_id, log=print):
     """
     Retorna (ordenado do mais antigo para o mais novo) os ids das mensagens
     com id > last_id. Se last_id == 0, retorna o historico completo.
+    Usa apenas min_id (offset_id deprecated) e ignora service messages.
     """
     ids = []
-    offset_idx = 0
+    # min_id no get_chat_history é tratado como inclusivo (min_id-1 interno),
+    # então last_id+1 garante id > last_id sem deprecation de offset_id
+    target_min = (last_id + 1) if last_id else 0
     while True:
         try:
-            async for m in cli.get_chat_history(chat_id=chat_id, offset_id=offset_idx, min_id=last_id):
-                if getattr(m, 'empty', False) or m.id < 1:
+            async for m in cli.get_chat_history(chat_id=chat_id, min_id=target_min):
+                if getattr(m, 'empty', False) or getattr(m, 'service', False) or m.id < 1:
                     continue
                 if m.id <= last_id:
-                    break
+                    continue
                 ids.append(m.id)
-                offset_idx = m.id
             break
         except errors.FloodWait as e:
             log('FloodWait while indexing: {}s'.format(e.value))
             await asyncio.sleep(e.value + random.randint(10, 35))
-            # retoma de onde parou (offset_idx guarda o id mais antigo visto)
         except Exception as e:
             log('Error indexing: {}'.format(e))
             break
@@ -198,6 +203,9 @@ async def get_message_safe(cli, chat_id, message_id, log=print):
 
 async def send_one(cli, dest_chat_id, m):
     """Envia uma mensagem tratando todos os tipos de midia."""
+    # service/empty não podem ser copiados
+    if getattr(m, 'service', False) or getattr(m, 'empty', False):
+        return
     if m.text:
         await cli.send_message(
             chat_id=dest_chat_id,

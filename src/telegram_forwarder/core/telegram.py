@@ -61,6 +61,9 @@ class telegram_panel:
             # Mantém apenas linhas no formato valido ip:porta:usuario:senha
             valid = []
             for line in lines:
+                # ignora silenciosamente placeholders de exemplo e comentários
+                if line.lower().startswith("ip:port") or line.startswith("#"):
+                    continue
                 parts = line.split(':')
                 if len(parts) == 4 and parts[1].isdigit():
                     valid.append(line)
@@ -68,7 +71,9 @@ class telegram_panel:
                     print(f"Ignoring invalid proxy line: {line}")
             return valid
         except Exception as e:
-            print(f"Error reading proxy file: {e}")
+            # arquivo ausente é normal (conexão direta)
+            if "No such file" not in str(e):
+                print(f"Error reading proxy file: {e}")
             return []
     
     
