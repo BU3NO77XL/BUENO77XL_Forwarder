@@ -72,7 +72,7 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 | **Bilíngue** | `core/i18n.py` com PT-BR/EN em toda UI, diálogos, logs e mensagens de backend |
 | **Daemon 24/7** | `tg-daemon` com `CHECK_INTERVAL` (default 120s), reconexão e `systemd` com `Restart=always` |
 | **Seed sem reenvio** | `tg-seed` marca histórico já enviado (útil na migração da v1) |
-| **Tema sênior** | `ui/theme/dark.py` — `Fusion` + `QPalette` escura apenas no `win32`; QSS explícito para `QTextBrowser`/`QListWidget`/`QComboBox` (corrige viewports brancos no `windowsvista`) |
+| **Tema dark** | `ui/theme/dark.py` — `Fusion` + `QPalette` escura apenas no `win32`; QSS explícito para `QTextBrowser`/`QListWidget`/`QComboBox` (corrige viewports brancos no `windowsvista`) |
 | **Erros robustos** | `FloodWait`, `ChannelPrivate`, sessão expirada, timeout e falhas genéricas com mensagens acionáveis e limpeza de estado |
 
 ---
