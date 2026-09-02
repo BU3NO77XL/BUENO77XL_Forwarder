@@ -165,7 +165,7 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 > ```
 > **Por que é obrigatório aqui:** este forwarder baixa e reenvia mídias pesadas em lote; sem aceleração C o `copy_message`/`download` trava a fila e a GUI parece congelada.
 >
-> **Por que Python 3.11 fixado:** `TgCrypto 1.2.5` só tem wheel pronto para **3.7–3.11**. Em **3.12+ não há wheel** e exigiria compilar com `Microsoft C++ Build Tools` (que nesta máquina estava quebrado em `14.51.36231` sem `cl.exe`). Fixar em 3.11 garante `uv sync` sem compilação.
+> **Por que Python 3.11 fixado:** `TgCrypto 1.2.5` só tem wheel pronto para **3.7–3.11**. Em **3.12+ não há wheel** e exigiria compilar com `Microsoft C++ Build Tools`. Fixar em 3.11 garante `uv sync` sem compilação.
 > **Se precisar usar 3.12:** instale `Microsoft C++ Build Tools` completo (*Desktop development with C++* + *Windows 11 SDK*) e mude `requires-python` para `>=3.11,<3.13`.
 > Confirme a aceleração: `uv run python -c "import tgcrypto; print('OK')"` — deve imprimir `OK` sem warning.
 
