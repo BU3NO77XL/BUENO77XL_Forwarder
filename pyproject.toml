@@ -14,8 +14,9 @@ name = "telegram-restricted-content-forwarder"
 version = "2.0.0"
 description = "GUI + Daemon para encaminhar posts de canais restritos do Telegram, com deteccao de apenas novas mensagens."
 readme = "README.md"
-# Python 3.10-3.12: compatível com macOS Catalina (10.15) e PyQt6
-requires-python = ">=3.10,<3.13"
+# Python fixado em 3.11: única versão com wheel pronto de TgCrypto (sem precisar Build Tools)
+# TgCrypto 1.2.5 não tem wheel para 3.12 (exige compilação C++ quebrada no 14.51)
+requires-python = "==3.11.*"
 # kurigram é um fork do pyrogram; o módulo importável é `pyrogram`
 dependencies = [
     # macOS Catalina (10.15): Qt 6.5+ exige macOS 11+, por isso pin antigo só no darwin.
@@ -29,9 +30,9 @@ dependencies = [
     "psutil>=5.9",
     "aiohttp>=3.9",      # usado apenas para checar proxies (não é gargalo)
     "kurigram>=1.0",     # fork do pyrogram (import: from pyrogram import Client)
-    # "tgcrypto>=1.2",   # OPCIONAL: acelera criptografia, mas exige Microsoft C++ Build Tools no Windows
-                        # kurigram/pyrogram funciona sem ele (fallback puro-python, só um pouco mais lento)
-                        # Para instalar depois: pip install tgcrypto  (com Build Tools) ou uv pip install tgcrypto
+    "tgcrypto>=1.2",     # OBRIGATÓRIO: acelera criptografia AES-IGE/CTR (10-30x mais rápido)
+                         # Sem ele o Pyrogram cai em fallback puro-python e downloads ficam extremamente lentos
+                         # Fixado em Python 3.11: tem wheel pronto, sem precisar Build Tools
 ]
 
 [project.optional-dependencies]
@@ -61,7 +62,7 @@ packages = ["src/telegram_forwarder"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -37,10 +37,12 @@ rsync -av --progress \
 ## 🖥️ Passo 2 — Preparar a VPS (Ubuntu/Debian)
 
 ```bash
-# Atualizar e instalar Python + uv (gerenciador de dependencias)
+# Atualizar e instalar Python 3.11 + uv (gerenciador de dependencias)
+# PROJETO FIXADO EM PYTHON 3.11 (TgCrypto só tem wheel até 3.11)
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3 python3-pip curl
+sudo apt install -y python3.11 python3.11-venv curl
 curl -LsSf https://astral.sh/uv/install.sh | sh   # instala uv
+uv python pin 3.11  # garante 3.11 mesmo se sistema tiver 3.12
 
 # Entrar na pasta do projeto
 cd ~/Telegram-Restricted-Content-Forwarder

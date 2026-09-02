@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-00C853?style=flat-square" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python >=3.10" />
+  <img src="https://img.shields.io/badge/python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11" />
   <img src="https://img.shields.io/badge/PyQt6-6.4%2B-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt6" />
   <img src="https://img.shields.io/badge/manager-uv-DE5FE9?style=flat-square" alt="uv" />
   <img src="https://img.shields.io/badge/daemon-systemd-FC6D26?style=flat-square" alt="systemd" />
@@ -142,20 +142,32 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 
 ## 🧰 Stack Tecnológica
 
-- **Runtime:** Python 3.10–3.12
-- **Telegram:** `kurigram` (fork Pyrogram, import `pyrogram`) + `tgcrypto` opcional
+- **Runtime:** Python **3.11** (fixado — única versão com wheel pronto de `TgCrypto`)
+- **Telegram:** `kurigram` (fork Pyrogram, import `pyrogram`) + `tgcrypto` **obrigatório** (aceleração 10-30x)
 - **GUI:** `PyQt6` (6.4.2 pinado no `darwin` para Catalina; ≥6.7 em win32/linux), `qasync`, `psutil`
 - **Rede:** `aiohttp` (checagem de proxy)
 - **Empacotamento:** `uv` + `hatchling` (`[project.scripts]` → `tg-forwarder`/`tg-daemon`/`tg-seed`)
-- **Qualidade:** `ruff` (100 col, py310), `pytest` com `pythonpath = ["src"]`
+- **Qualidade:** `ruff` (100 col, py311), `pytest` com `pythonpath = ["src"]`
 
 ---
 
 ## 📦 Requisitos
 
-- Python 3.10+ e [uv](https://docs.astral.sh/uv/)
+- Python **3.11** e [uv](https://docs.astral.sh/uv/) — **versão fixada** (`.python-version` + `requires-python ==3.11.*`)
 - Windows 10/11, Linux ou macOS
 - Credenciais Telegram API (`API_ID` / `API_HASH` em https://my.telegram.org/apps)
+- **`TgCrypto` obrigatório** — biblioteca C de criptografia do Pyrogram/Kurigram (já incluso em `uv sync`)
+
+> ### ⚠️ TgCrypto — Requisito Obrigatório de Performance
+> O `TgCrypto` **não é opcional**. Sem ele o Pyrogram usa fallback **puro-Python** e fica **10-30x mais lento** — downloads de mídia, álbuns e arquivos grandes demoram muitíssimo e podem dar timeout.
+> ```
+> TgCrypto is missing! Pyrogram will work the same, but at a much slower speed.
+> ```
+> **Por que é obrigatório aqui:** este forwarder baixa e reenvia mídias pesadas em lote; sem aceleração C o `copy_message`/`download` trava a fila e a GUI parece congelada.
+>
+> **Por que Python 3.11 fixado:** `TgCrypto 1.2.5` só tem wheel pronto para **3.7–3.11**. Em **3.12+ não há wheel** e exigiria compilar com `Microsoft C++ Build Tools` (que nesta máquina estava quebrado em `14.51.36231` sem `cl.exe`). Fixar em 3.11 garante `uv sync` sem compilação.
+> **Se precisar usar 3.12:** instale `Microsoft C++ Build Tools` completo (*Desktop development with C++* + *Windows 11 SDK*) e mude `requires-python` para `>=3.11,<3.13`.
+> Confirme a aceleração: `uv run python -c "import tgcrypto; print('OK')"` — deve imprimir `OK` sem warning.
 
 ---
 
@@ -167,7 +179,10 @@ git clone https://github.com/BU3NO77XL/telegram_bueno77xl.git
 cd telegram_bueno77xl
 
 # 2. Instalar dependências (cria .venv automaticamente)
+#    Python já está pinado em 3.11 (.python-version) — inclui TgCrypto sem compilar
 uv sync
+#    Confirme a aceleração (deve imprimir "TgCrypto OK", sem warning):
+uv run python -c "import tgcrypto; print('TgCrypto OK')"
 
 # 3. Rodar GUI — escolha um:
 uv run tg-forwarder                    # recomendado (entry-point)
