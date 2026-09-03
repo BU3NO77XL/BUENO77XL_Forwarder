@@ -161,8 +161,13 @@ async def main():
         await asyncio.sleep(CHECK_INTERVAL + random.randint(0, 15))
 
 
-if __name__ == '__main__':
+def start():
+    """Entry-point sincrono para console_scripts (evita RuntimeWarning: coroutine was never awaited)."""
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         log('Encerrado pelo usuario.')
+
+
+if __name__ == '__main__':
+    start()

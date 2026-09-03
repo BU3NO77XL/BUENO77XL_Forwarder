@@ -91,5 +91,10 @@ async def main():
             pass
 
 
-if __name__ == '__main__':
+def start():
+    """Entry-point sincrono para console_scripts (evita RuntimeWarning: coroutine was never awaited)."""
     asyncio.run(main())
+
+
+if __name__ == '__main__':
+    start()

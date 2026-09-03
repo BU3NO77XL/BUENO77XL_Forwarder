@@ -6,9 +6,42 @@ from .paths import PROJECT_ROOT, DATA_DIR, ACCOUNT_DIR, PROXY_FILE, ENV_FILE
 
 def load_env(path=None):
     """Carrega variaveis de um arquivo .env para o ambiente.
-    Nao sobrescreve variaveis que ja existem no ambiente."""
+    Nao sobrescreve variaveis que ja existem no ambiente.
+
+    Se o arquivo .env nao existir, tenta clonar a partir de .env.example
+    (raiz ou config/) e emite um aviso amigavel.
+    """
+    import shutil
+    from pathlib import Path
+
     if path is None:
         path = str(ENV_FILE)
+
+    env_path = Path(path)
+    if not env_path.exists():
+        # procura .env.example em locais conhecidos
+        candidates = [
+            env_path.parent / ".env.example",
+            Path(__file__).resolve().parents[3] / ".env.example",
+            Path(__file__).resolve().parents[3] / "config" / ".env.example",
+        ]
+        example = next((c for c in candidates if c.exists()), None)
+        if example is not None:
+            try:
+                shutil.copy(str(example), str(env_path))
+                print(
+                    "Arquivo .env nao encontrado. Um novo arquivo foi gerado a partir de "
+                    f"{example.name}, por favor preencha suas credenciais em {env_path}."
+                )
+            except Exception as e:
+                print(f"Aviso: nao foi possivel criar {env_path} a partir de {example}: {e}")
+        else:
+            # sem exemplo disponivel, apenas avisa
+            print(
+                f"Arquivo .env nao encontrado em {env_path}. "
+                "Crie-o a partir de .env.example e preencha suas credenciais."
+            )
+
     try:
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:

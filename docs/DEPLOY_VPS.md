@@ -2,6 +2,8 @@
 
 Guia para rodar o forwarder **24/7 na VPS**, encaminhando **apenas as mensagens novas** do canal de origem para o seu canal de destino.
 
+> **Opções de deploy:** **A) systemd** (VPS tradicional) ou **B) Docker** (recomendado, um comando, agnóstico). Ambas compartilham `data/state.json` e `account/*.session`.
+
 ---
 
 ## ✅ O que mudou (detecção de mensagens novas)
@@ -62,6 +64,8 @@ cp .env.example .env
 nano .env
 ```
 
+> **Resiliência:** se o `.env` não existir (comum em VPS onde dotfiles são omitidos no upload), o `core/telegram.py:load_env()` o **clona automaticamente** a partir de `.env.example` na primeira execução (`uv run tg-daemon`, `tg-seed` ou `docker compose up`) e exibe: `Arquivo .env não encontrado. Um novo arquivo foi gerado a partir de .env.example, por favor preencha suas credenciais em ...`.
+
 Preencha:
 
 ```ini
@@ -118,7 +122,26 @@ Você deve ver algo como:
 
 ---
 
-## 🔁 Passo 4 — Rodar 24/7 com systemd (reinicia sozinho)
+## 🐳 Passo 4 — Alternativa Docker (deploy em um comando, <150 MB RAM)
+
+Elimina problemas de `PATH`, dependências do sistema e `systemd` manual.
+
+```bash
+# Na VPS (qualquer distro com Docker)
+cp .env.example .env && nano .env   # preencha API_ID/API_HASH/PHONE/FROM_CHAT/TO_CHAT
+docker compose up -d --build
+docker compose logs -f tg-forwarder
+# Parar: docker compose down
+# Seed (se já enviou histórico local): docker compose run --rm tg-forwarder tg-seed
+```
+
+`docker-compose.yml` usa `restart: always`, `env_file: .env` e volumes `./data:/app/data` + `./account:/app/account` (mesmo estado da GUI). Imagem multi-stage com `uv` (`Dockerfile`) mantém o container abaixo de 150 MB, ideal para `e2-micro`.
+
+> `.env` é lido via `env_file` e não é copiado para a imagem (`.dockerignore`).
+
+---
+
+## 🔁 Passo 4 (systemd) — Rodar 24/7 com systemd (reinicia sozinho)
 
 ```bash
 sudo nano /etc/systemd/system/tgforwarder.service

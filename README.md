@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11" />
   <img src="https://img.shields.io/badge/PyQt6-6.4%2B-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt6" />
   <img src="https://img.shields.io/badge/manager-uv-DE5FE9?style=flat-square" alt="uv" />
-  <img src="https://img.shields.io/badge/daemon-systemd-FC6D26?style=flat-square" alt="systemd" />
+  <img src="https://img.shields.io/badge/daemon-systemd%20%7C%20docker-FC6D26?style=flat-square" alt="systemd/docker" />
   <img src="https://img.shields.io/badge/i18n-PT--BR%20%7C%20EN-0EA5E9?style=flat-square" alt="i18n" />
 </p>
 
@@ -39,7 +39,7 @@
 - [Configuração](#-configuração)
 - [Como Usar](#-como-usar)
 - [Estado Persistente e Incremental](#-estado-persistente-e-incremental)
-- [Deploy em VPS — Daemon Headless](#-deploy-em-vps--daemon-headless)
+- [Deploy em VPS — Daemon Headless (systemd / Docker)](#-deploy-em-vps--daemon-headless)
 - [Testes](#-testes)
 - [Segurança e Privacidade](#-segurança-e-privacidade)
 - [Changelog Técnico](#-changelog-técnico)
@@ -70,8 +70,10 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 | **Seletor de canais** | Diálogo com busca que lista todos os chats da conta; preenche `@username` ou `id` automaticamente |
 | **Multi-conta** | Gerenciamento de sessões `.session` em `account/`, combo exibindo `@username` |
 | **Bilíngue** | `core/i18n.py` com PT-BR/EN em toda UI, diálogos, logs e mensagens de backend |
-| **Daemon 24/7** | `tg-daemon` com `CHECK_INTERVAL` (default 120s), reconexão e `systemd` com `Restart=always` |
+| **Daemon 24/7** | `tg-daemon` com `CHECK_INTERVAL` (default 120s), reconexão e `systemd` ou `Docker` com `restart: always` |
 | **Seed sem reenvio** | `tg-seed` marca histórico já enviado (útil na migração da v1) |
+| **Docker** | `Dockerfile` multi-stage com `uv` + `docker-compose.yml` (<150 MB RAM, deploy com `docker compose up -d`) |
+| **.env resiliente** | `load_env()` clona `.env.example` automaticamente se `.env` ausente, com aviso amigável |
 | **Tema dark** | `ui/theme/dark.py` — `Fusion` + `QPalette` escura apenas no `win32`; QSS explícito para `QTextBrowser`/`QListWidget`/`QComboBox` (corrige viewports brancos no `windowsvista`) |
 | **Erros robustos** | `FloodWait`, `ChannelPrivate`, sessão expirada, timeout e falhas genéricas com mensagens acionáveis e limpeza de estado |
 
@@ -110,17 +112,20 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 ```
 .
 ├── main.py / daemon.py / seed_state.py   # shims finos → src (compat)
+├── Dockerfile                            # multi-stage com uv (python:3.11-slim)
+├── docker-compose.yml                    # tg-forwarder (restart: always)
+├── .dockerignore
 ├── src/telegram_forwarder/
 │   ├── app.py                            # launcher GUI (14 linhas)
 │   ├── __main__.py                       # python -m telegram_forwarder
 │   ├── core/
 │   │   ├── paths.py                      # resolução de caminhos
-│   │   ├── telegram.py                   # TelegramClient + helpers
+│   │   ├── telegram.py                   # TelegramClient + load_env com auto-clone .env
 │   │   ├── forwarder.py                  # lógica incremental + estado
 │   │   └── i18n.py                       # PT-BR/EN
 │   ├── daemon/
-│   │   ├── daemon.py                     # loop headless
-│   │   └── seed.py                       # marca estado sem reenviar
+│   │   ├── daemon.py                     # loop headless (entry-point sync start())
+│   │   └── seed.py                       # marca estado sem reenviar (entry-point sync start())
 │   └── ui/
 │       ├── panel.py                      # painel de logs/inputs
 │       ├── dialogs.py                    # CodeDialog / ChannelPicker
@@ -133,9 +138,9 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 │   └── test_pair.py                      # isolamento por par origem→destino
 ├── assets/{icon.jpg,screenshot.png}
 ├── config/{proxy.txt,.env.example}
-├── docs/DEPLOY_VPS.md                    # guia e2-micro + systemd
+├── docs/DEPLOY_VPS.md                    # guia e2-micro + systemd/docker
 ├── data/.gitkeep / account/.gitkeep      # runtime (gitignored)
-└── pyproject.toml                        # uv + hatchling + scripts
+└── pyproject.toml                        # uv + hatchling + scripts (tg-daemon/tg-seed -> start())
 ```
 
 ---
@@ -204,6 +209,9 @@ Copie e preencha o `.env` (nunca commite — já está no `.gitignore`):
 
 ```bash
 cp .env.example .env        # ou cp config/.env.example .env
+# Se o .env não existir, o próximo `uv run`/`docker compose` o cria
+# automaticamente a partir do .env.example com aviso:
+# "Arquivo .env não encontrado. Um novo arquivo foi gerado..."
 ```
 
 ```ini
@@ -218,7 +226,7 @@ TO_CHAT=-1004461422809         # canal/grupo destino
 CHECK_INTERVAL=120             # segundos entre verificações
 ```
 
-> `account/*.session`, `data/*.json` e `.env` são runtime e estão gitignorados. `data/state.json` é criado automaticamente.
+> `account/*.session`, `data/*.json` e `.env` são runtime e estão gitignorados. `data/state.json` é criado automaticamente. O `core/telegram.py:load_env()` clona `.env.example` → `.env` se necessário.
 
 ---
 
@@ -256,18 +264,28 @@ uv run pytest                    # testes
 
 Guia completo em **[docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md)** — resumo:
 
+### Opção A — systemd (VPS tradicional)
+
 ```bash
 # Na VPS (Ubuntu/Debian)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 cd ~/telegram_bueno77xl && uv sync --extra daemon
-cp .env.example .env && nano .env
+cp .env.example .env && nano .env  # se esquecer, load_env() cria sozinho
 uv run tg-seed      # apenas 1x se já enviou histórico local
 uv run tg-daemon    # teste manual
 # systemd: /etc/systemd/system/tgforwarder.service → enable/start (ver docs)
 journalctl -u tgforwarder -f
 ```
 
-> Copie `account/`, `data/` e `.env` da máquina local para a VPS (`rsync -av --exclude '.git' ...`) para continuar de onde parou.
+### Opção B — Docker (recomendado, agnóstico)
+
+```bash
+cp .env.example .env && nano .env   # edite API_ID/API_HASH/PHONE/FROM_CHAT/TO_CHAT
+docker compose up -d --build        # <150 MB RAM, restart: always
+docker compose logs -f tg-forwarder
+```
+
+> Copie `account/`, `data/` e `.env` da máquina local para a VPS (`rsync -av --exclude '.git' ...`) para continuar de onde parou. O Docker monta `./data` e `./account` como volumes.
 
 ---
 
@@ -301,10 +319,11 @@ uv run python -m pytest tests -v
 - **Estrutura sênior:** `src` layout + `mixins` (fatia de `app.py` monolítico de 694 linhas).
 - **Tema Windows:** `Fusion` + `QPalette` só em `win32`; QSS explícito para `QTextBrowser`/`QPlainTextEdit`/`QListWidget`/`QComboBox QAbstractItemView`/`QScrollBar`.
 - **Incremental:** `core/forwarder.py` com estado atômico por tupla.
-- **Daemon:** `daemon.py` + `seed.py` + extra `daemon` no `pyproject.toml`.
+- **Daemon:** `daemon.py` + `seed.py` + extra `daemon` no `pyproject.toml` (entry-points `start()` síncronos).
 - **GUI:** cores de status, seletor com busca, combo `@username`, rótulo de estado, botão travado durante envio, tratamento `FloodWait`/sessão expirada.
 - **i18n:** `core/i18n.py` com `t()` e `backend_message()` em toda superfície.
 - **Testes:** `test_state.py` + `test_pair.py`.
+- **Deploy produção:** `core/telegram.py:load_env()` com auto-clone de `.env` + `Dockerfile`/`docker-compose.yml` multi-stage com `uv` (<150 MB).
 
 </details>
 

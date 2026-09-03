@@ -54,8 +54,8 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 tg-forwarder = "telegram_forwarder.app:main"
-tg-daemon = "telegram_forwarder.daemon.daemon:main"
-tg-seed = "telegram_forwarder.daemon.seed:main"
+tg-daemon = "telegram_forwarder.daemon.daemon:start"
+tg-seed = "telegram_forwarder.daemon.seed:start"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/telegram_forwarder"]

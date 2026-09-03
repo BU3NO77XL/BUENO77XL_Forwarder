@@ -1,0 +1,14 @@
+services:
+  tg-forwarder:
+    build: .
+    container_name: tg_bot_daemon
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./account:/app/account
+      # opcional: persistir downloads temporarios
+      # - ./downloads:/app/downloads
+    # daemon nao precisa expor porta
+    # Se precisar debugar: docker compose logs -f tg-forwarder
