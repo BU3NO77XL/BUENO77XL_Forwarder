@@ -32,7 +32,10 @@ import traceback
 from datetime import datetime
 
 from telegram_forwarder.core.telegram import load_env, telegram_panel
-from telegram_forwarder.core.forwarder import State, fetch_new_ids, get_message_safe, send_with_retry
+from telegram_forwarder.core.forwarder import (
+    State, fetch_new_ids, get_message_safe, send_pacing_delay, send_with_retry,
+)
+from telegram_forwarder.core.forum import ensure_topic_map, is_forum_chat, message_topic_id
 from pyrogram import Client, errors
 
 load_env()
@@ -109,9 +112,24 @@ async def run_cycle():
             return
         chat_id, dest_id = src[0], dst[0]
 
+        # O daemon antigo continua igual para canais e grupos sem topicos.
+        # O mapa so e criado quando os dois lados sao grupos-forum.
+        source_chat = await cli.get_chat(chat_id)
+        dest_chat = await cli.get_chat(dest_id)
+        forum_mode = is_forum_chat(source_chat) and is_forum_chat(dest_chat)
+        if forum_mode:
+            log('Grupo-forum detectado. Os topicos serao recriados no destino.')
+        else:
+            log('Modo normal: origem/destino nao sao ambos grupos-forum.')
+
         state = State()
         # Chave por (conta, origem, destino): cada par tem seu proprio estado
         last_id = state.get_last_id_pair(PHONE, FROM_CHAT, TO_CHAT)
+        topic_map = {}
+        if forum_mode:
+            topic_map = await ensure_topic_map(
+                cli, chat_id, dest_id, state, PHONE, str(chat_id), str(dest_id), log=log
+            )
         if last_id > 0:
             log('Estado encontrado: ultima enviada id={} (somente novas serao enviadas).'.format(last_id))
         else:
@@ -126,17 +144,47 @@ async def run_cycle():
         log('{} nova(s) mensagem(ns) detectada(s). Enviando...'.format(total))
         ok = 0
         bad = 0
+        copied_albums = set()
+        failed_albums = set()
         for i, mid in enumerate(new_ids, 1):
             m = await get_message_safe(cli, chat_id, mid, log=log)
             if m is None or getattr(m, 'empty', False):
                 continue
-            if await send_with_retry(cli, dest_id, m, log=log):
+            media_group_id = getattr(m, 'media_group_id', None)
+            if forum_mode and media_group_id in copied_albums:
+                state.set_last_id_pair(PHONE, FROM_CHAT, TO_CHAT, mid)
+                continue
+            topic_id = None
+            if forum_mode:
+                topic_id = topic_map.get(str(message_topic_id(m)))
+                if topic_id is None:
+                    log('Topico de origem nao mapeado; mensagem id={} ignorada.'.format(mid))
+                    bad += 1
+                    continue
+                # O General e o destino padrao; nao precisa de thread id.
+                if topic_id == 1:
+                    topic_id = None
+            copy_album = bool(forum_mode and media_group_id and media_group_id not in failed_albums)
+            sent = await send_with_retry(
+                cli, dest_id, m, log=log, message_thread_id=topic_id,
+                source_chat_id=chat_id, prefer_copy=forum_mode, copy_album=copy_album,
+            )
+            if not sent and copy_album:
+                failed_albums.add(media_group_id)
+                log('Album nao pode ser copiado como grupo; usando envio individual group_id={}'.format(media_group_id))
+                sent = await send_with_retry(
+                    cli, dest_id, m, log=log, message_thread_id=topic_id,
+                    source_chat_id=chat_id, prefer_copy=False,
+                )
+            if sent:
                 ok += 1
+                if copy_album:
+                    copied_albums.add(media_group_id)
                 state.set_last_id_pair(PHONE, FROM_CHAT, TO_CHAT, mid)
             else:
                 bad += 1
             log('[{}/{}] id={} ok={} falha={}'.format(i, total, mid, ok, bad))
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(send_pacing_delay())
         log('Ciclo concluido: {} enviada(s), {} falha(s).'.format(ok, bad))
     finally:
         try:

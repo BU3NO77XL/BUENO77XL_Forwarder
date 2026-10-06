@@ -40,8 +40,11 @@ class PickerMixin:
                 uname = getattr(c, 'username', None)
                 value = '@' + uname if uname else str(c.id)
                 title_txt = c.title or value
-                label = '{}  —  {}'.format(title_txt, value)
-                picker.add_item(label, (value, title_txt))
+                type_name = getattr(getattr(c, 'type', None), 'name', getattr(c, 'type', '?'))
+                is_forum = bool(getattr(c, 'is_forum', False)) or type_name == 'FORUM'
+                kind = 'FORUM' if is_forum else str(type_name)
+                label = '{}  —  {}  [{}]'.format(title_txt, value, kind)
+                picker.add_item(label, (value, label))
         except errors.FloodWait as e:
             await self.show_async_message(t('t_error'), t('d_floodwait_pick').format(e.value), icon=QMessageBox.Icon.Critical)
             return

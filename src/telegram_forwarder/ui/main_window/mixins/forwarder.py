@@ -8,7 +8,14 @@ from PyQt6.QtWidgets import QMessageBox
 from qasync import asyncSlot
 from pyrogram import errors
 from telegram_forwarder.core.telegram import telegram_panel
-from telegram_forwarder.core.forwarder import State, fetch_new_ids, get_message_safe, send_with_retry
+from telegram_forwarder.core.forwarder import (
+    State, fetch_new_ids, get_message_safe, send_pacing_delay, send_with_retry,
+)
+from telegram_forwarder.core.forum import (
+    ensure_topic_map,
+    is_forum_chat,
+    message_topic_id,
+)
 from telegram_forwarder.core.i18n import t
 
 # cores
@@ -75,9 +82,30 @@ class ForwarderMixin:
             chatfor = await self.resolve_chat_obj(cli, forchat)
             self.ui.forward_log.appendPlainText(t('l_source').format(chat.title, chat.id))
             self.ui.forward_log.appendPlainText(t('l_destination').format(chatfor.title, chatfor.id))
+            source_type = getattr(getattr(chat, 'type', None), 'name', getattr(chat, 'type', '?'))
+            dest_type = getattr(getattr(chatfor, 'type', None), 'name', getattr(chatfor, 'type', '?'))
+            self.ui.forward_log.appendPlainText(
+                'Diagnostico: origem type={} is_forum={}; destino type={} is_forum={}'.format(
+                    source_type, getattr(chat, 'is_forum', None),
+                    dest_type, getattr(chatfor, 'is_forum', None),
+                )
+            )
             state = State()
             src_key = str(chat.id)
             dest_key = str(chatfor.id)
+            forum_mode = is_forum_chat(chat) and is_forum_chat(chatfor)
+            topic_map = {}
+            if forum_mode:
+                self.ui.forward_log.appendPlainText(t('l_forum_detected'))
+                self.ui.forward_log.appendPlainText(t('l_forum_sync'))
+                topic_map = await ensure_topic_map(
+                    cli, chat.id, chatfor.id, state, phone, src_key, dest_key,
+                    log=lambda s: self.ui.forward_log.appendPlainText(s),
+                )
+            else:
+                self.ui.forward_log.appendPlainText(
+                    'Modo normal: origem/destino nao foram identificados como grupos com topicos.'
+                )
             last_id = state.get_last_id_pair(phone, src_key, dest_key)
             if last_id > 0:
                 self.ui.forward_log.appendPlainText(t('l_state_found').format(last_id))
@@ -97,6 +125,8 @@ class ForwarderMixin:
                 return
             self.ui.forward_log.appendPlainText(t('l_indexed').format(total))
             stopped = False
+            copied_albums = set()
+            failed_albums = set()
             for mid in all_ids:
                 if app_mod.Extract == False:
                     stopped = True
@@ -105,8 +135,50 @@ class ForwarderMixin:
                 if messagae is None or getattr(messagae, 'empty', False):
                     continue
                 ana_count += 1
-                if await send_with_retry(cli, chatfor.id, messagae, log=lambda s: self.ui.forward_log.appendPlainText(s)):
+                media_group_id = getattr(messagae, 'media_group_id', None)
+                if forum_mode and media_group_id in copied_albums:
+                    state.set_last_id_pair(phone, src_key, dest_key, mid)
+                    self.ui.forward_log.appendPlainText(
+                        'Parte do album preservada: group_id={} id={}'.format(media_group_id, mid)
+                    )
+                    continue
+                topic_id = None
+                if forum_mode:
+                    topic_id = topic_map.get(str(message_topic_id(messagae)))
+                    if topic_id is None:
+                        self.ui.forward_log.appendPlainText(
+                            'Topico de origem nao mapeado; mensagem id={} ignorada.'.format(mid)
+                        )
+                        badmsg += 1
+                        continue
+                    # O General e o destino padrao; nao precisa de thread id.
+                    if topic_id == 1:
+                        topic_id = None
+                copy_album = bool(forum_mode and media_group_id and media_group_id not in failed_albums)
+                sent = await send_with_retry(
+                    cli, chatfor.id, messagae,
+                    log=lambda s: self.ui.forward_log.appendPlainText(s),
+                    message_thread_id=topic_id,
+                    source_chat_id=chat.id,
+                    prefer_copy=forum_mode,
+                    copy_album=copy_album,
+                )
+                if not sent and copy_album:
+                    failed_albums.add(media_group_id)
+                    self.ui.forward_log.appendPlainText(
+                        'Album nao pode ser copiado como grupo; usando envio individual group_id={}'.format(media_group_id)
+                    )
+                    sent = await send_with_retry(
+                        cli, chatfor.id, messagae,
+                        log=lambda s: self.ui.forward_log.appendPlainText(s),
+                        message_thread_id=topic_id,
+                        source_chat_id=chat.id,
+                        prefer_copy=False,
+                    )
+                if sent:
                     okmsg += 1
+                    if copy_album:
+                        copied_albums.add(media_group_id)
                     state.set_last_id_pair(phone, src_key, dest_key, mid)
                     self.ui.lbl_last_message.setText(t('l_last_fwd').format(mid, datetime.now().strftime('%H:%M:%S')))
                 else:
@@ -115,7 +187,7 @@ class ForwarderMixin:
                 self.ui.failed_count.display(badmsg)
                 self.ui.total_count.display(ana_count)
                 self.ui.forward_log.appendPlainText("[{}/{}] id={}".format(ana_count, total, mid))
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(send_pacing_delay())
             if stopped:
                 self.set_status(t('st_stopped'), COLOR_STOPPED)
                 self.ui.forward_log.appendPlainText(t('l_stopped_user'))

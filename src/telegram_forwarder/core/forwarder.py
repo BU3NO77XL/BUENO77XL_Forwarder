@@ -24,6 +24,22 @@ from pyrogram import errors
 from .paths import STATE_FILE, ensure_runtime_dirs
 
 
+def send_pacing_delay() -> float:
+    """Atraso aleatorio entre envios, configurado exclusivamente no .env."""
+    raw_min = os.environ.get('SEND_DELAY_MIN', '').strip()
+    raw_max = os.environ.get('SEND_DELAY_MAX', '').strip()
+    if not raw_min or not raw_max:
+        raise RuntimeError('SEND_DELAY_MIN e SEND_DELAY_MAX devem estar configurados no .env')
+    try:
+        lower = float(raw_min)
+        upper = float(raw_max)
+    except ValueError as exc:
+        raise RuntimeError('SEND_DELAY_MIN e SEND_DELAY_MAX devem ser numeros') from exc
+    if lower < 0 or upper < lower:
+        raise RuntimeError('SEND_DELAY_MIN/MAX invalidos: use 0 <= MIN <= MAX')
+    return random.uniform(lower, upper)
+
+
 def normalize_channel(text: str) -> str:
     """Normaliza o identificador do canal para usar como chave de estado.
 
@@ -147,13 +163,38 @@ class State:
                 return {}
         return self.get_entry(phone, fromchat)
 
+    def get_topic_map_pair(self, phone: str, fromchat: str, dest: str) -> dict:
+        """Retorna o mapa de topicos do par, sem quebrar estados legados."""
+        entry = self._data.get(self._pair_key(phone, fromchat, dest), {})
+        topics = entry.get('topics', {}) if isinstance(entry, dict) else {}
+        return dict(topics) if isinstance(topics, dict) else {}
+
+    def set_topic_map_pair(self, phone: str, fromchat: str, dest: str, topics: dict) -> None:
+        """Persiste o mapa origem-topic -> destino-topic do par."""
+        key = self._pair_key(phone, fromchat, dest)
+        entry = self._data.get(key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+        entry.update({
+            'dest': normalize_channel(dest),
+            'topics': dict(topics),
+            'updated_at': datetime.now().isoformat(timespec='seconds'),
+        })
+        self._data[key] = entry
+        self._save()
+
     def set_last_id_pair(self, phone: str, fromchat: str, dest: str, last_id: int) -> None:
-        """Salva o last_id na chave (conta|origem|destino)."""
-        self._data[self._pair_key(phone, fromchat, dest)] = {
+        """Salva o last_id, preservando o mapa de topicos ja criado."""
+        key = self._pair_key(phone, fromchat, dest)
+        entry = self._data.get(key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+        entry.update({
             'last_id': int(last_id),
             'dest': normalize_channel(dest),
             'updated_at': datetime.now().isoformat(timespec='seconds'),
-        }
+        })
+        self._data[key] = entry
         self._save()
 
 
@@ -228,17 +269,41 @@ async def _download_safe(m, timeout=180, retries=3, log=print):
     raise asyncio.TimeoutError(f"Falha ao baixar mídia id={getattr(m, 'id', '?')} após {retries} tentativas")
 
 
-async def send_one(cli, dest_chat_id, m):
+async def send_one(cli, dest_chat_id, m, message_thread_id=None, source_chat_id=None,
+                   prefer_copy=False, copy_album=False):
     """Envia uma mensagem tratando todos os tipos de midia."""
+    topic_kwargs = {} if message_thread_id is None else {'message_thread_id': message_thread_id}
     # service/empty não podem ser copiados
     if getattr(m, 'service', False) or getattr(m, 'empty', False):
         return
+    # Em forum, a copia nativa preserva formatacao, legenda, preview e midia.
+    # Se falhar (por exemplo, conteudo protegido), usa o fallback manual abaixo.
+    if prefer_copy and source_chat_id is not None and getattr(m, 'id', None):
+        if copy_album and getattr(m, 'media_group_id', None):
+            await cli.copy_media_group(
+                chat_id=dest_chat_id,
+                from_chat_id=source_chat_id,
+                message_id=m.id,
+                **topic_kwargs,
+            )
+            return
+        try:
+            await cli.copy_message(
+                chat_id=dest_chat_id,
+                from_chat_id=source_chat_id,
+                message_id=m.id,
+                **topic_kwargs,
+            )
+            return
+        except Exception:
+            pass
     if m.text:
         await cli.send_message(
             chat_id=dest_chat_id,
             text=m.text,
             entities=m.entities,
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
+            **topic_kwargs,
         )
     elif m.photo:
         path = await _download_safe(m)
@@ -247,6 +312,7 @@ async def send_one(cli, dest_chat_id, m):
             photo=path,
             caption=m.caption,
             caption_entities=m.caption_entities,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -263,6 +329,7 @@ async def send_one(cli, dest_chat_id, m):
             duration=m.video.duration,
             width=m.video.width,
             height=m.video.height,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -276,6 +343,7 @@ async def send_one(cli, dest_chat_id, m):
             document=path,
             caption=m.caption,
             caption_entities=m.caption_entities,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -292,6 +360,7 @@ async def send_one(cli, dest_chat_id, m):
             duration=m.audio.duration,
             performer=m.audio.performer,
             title=m.audio.title,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -308,6 +377,7 @@ async def send_one(cli, dest_chat_id, m):
             duration=m.animation.duration,
             width=m.animation.width,
             height=m.animation.height,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -322,6 +392,7 @@ async def send_one(cli, dest_chat_id, m):
             caption=m.caption,
             caption_entities=m.caption_entities,
             duration=m.voice.duration,
+            **topic_kwargs,
         )
         try:
             if path and os.path.exists(path):
@@ -329,19 +400,29 @@ async def send_one(cli, dest_chat_id, m):
         except Exception:
             pass
     else:
-        await m.copy(dest_chat_id)
+        copy_kwargs = {} if message_thread_id is None else {
+            'reply_to_message_id': message_thread_id,
+        }
+        await m.copy(dest_chat_id, **copy_kwargs)
 
 
-async def send_with_retry(cli, dest_chat_id, m, log=print):
+async def send_with_retry(cli, dest_chat_id, m, log=print, message_thread_id=None,
+                          source_chat_id=None, prefer_copy=False, copy_album=False):
     """Envia com 1 retry apos FloodWait. Retorna True se enviado com sucesso."""
     try:
-        await send_one(cli, dest_chat_id, m)
+        await send_one(
+            cli, dest_chat_id, m, message_thread_id=message_thread_id,
+            source_chat_id=source_chat_id, prefer_copy=prefer_copy, copy_album=copy_album,
+        )
         return True
     except errors.FloodWait as e:
         log('FloodWait: {}'.format(e.value))
         await asyncio.sleep(e.value + random.randint(10, 35))
         try:
-            await send_one(cli, dest_chat_id, m)
+            await send_one(
+                cli, dest_chat_id, m, message_thread_id=message_thread_id,
+                source_chat_id=source_chat_id, prefer_copy=prefer_copy, copy_album=copy_album,
+            )
             return True
         except Exception as e2:
             log('Error sending [{}]: {}'.format(getattr(m, 'id', '?'), e2))
