@@ -149,8 +149,11 @@ O diferencial é o **encaminhamento incremental**: após a primeira sincronizaç
 
 - **Runtime:** Python **3.11** (fixado — única versão com wheel pronto de `TgCrypto`)
 - **Telegram:** `kurigram` (fork Pyrogram, import `pyrogram`) + `tgcrypto` **obrigatório** (aceleração 10-30x)
-- **GUI:** `PyQt6` (6.4.2 pinado no `darwin` para Catalina; ≥6.7 em win32/linux), `qasync`, `psutil`
-- **Rede:** `aiohttp` (checagem de proxy)
+- **GUI (interface gráfica — desktop `PyQt6 + qasync`, não é web):** da interface são só 3 — resto é backend:
+  - `PyQt6` — binding Python → Qt, a GUI em si: `QApplication`/`QMainWindow`/`QDialog`/`QListWidget`/`QProgressDialog` em `app.py:6`, `ui/panel.py:9`, `ui/main_window/window.py:3`, `ui/dialogs.py:1`, `ui/theme/dark.py:8`.
+  - `pyqt6-qt6` — binários C++ do `Qt6` por baixo (`QtWidgets`/`QtGui`/`QtCore`); `PyQt6` sozinho é só wrapper, quem desenha/processa é esse (`pyproject.toml:26,28`).
+  - `qasync` — ponte `asyncio ↔ Qt`: `QEventLoop(app)` em `app.py:8,35` + `@asyncSlot()` em `mixins/{account:5,forwarder:8,picker:5,ui_helpers:6}.py` — deixa login/download/forward Telegram rodar sem congelar a janela.
+  - Não são UI: `kurigram` (MTProto Telegram), `tgcrypto` (acelera AES 10-30x), `aiohttp` (checar proxy), `psutil` (RAM/CPU em `core/telegram.py:356`).
 - **Empacotamento:** `uv` + `hatchling` (`[project.scripts]` → `tg-forwarder`/`tg-daemon`/`tg-seed`)
 - **Qualidade:** `ruff` (100 col, py311), `pytest` com `pythonpath = ["src"]`
 
