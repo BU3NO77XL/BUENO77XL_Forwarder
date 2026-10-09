@@ -20,12 +20,12 @@ requires-python = "==3.11.*"
 # kurigram é um fork do pyrogram; o módulo importável é `pyrogram`
 dependencies = [
     # macOS Catalina (10.15): Qt 6.5+ exige macOS 11+, por isso pin antigo só no darwin.
-    # No Windows/Linux usamos versões recentes: PyQt6 6.4.2 + PyQt6-sip 13.12+
-    # causa access violation (segfault) em classes com herança múltipla (mixin + QWidget).
+    # Em Linux/Windows, limitar Qt a 6.7 mantém suporte a CPUs sem SSE4.2/POPCNT.
+    # PyQt6 6.4.2 + PyQt6-sip 13.12+ causa access violation em herança múltipla.
     "PyQt6==6.4.2; sys_platform == 'darwin'",
     "pyqt6-qt6==6.4.2; sys_platform == 'darwin'",
-    "PyQt6>=6.7; sys_platform != 'darwin'",
-    "pyqt6-qt6>=6.7; sys_platform != 'darwin'",
+    "PyQt6>=6.7,<6.8; sys_platform != 'darwin'",
+    "pyqt6-qt6>=6.7,<6.8; sys_platform != 'darwin'",
     "qasync>=0.27",
     "psutil>=5.9",
     "aiohttp>=3.9",      # usado apenas para checar proxies (não é gargalo)
