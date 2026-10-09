@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 """Compatibilidade de encaminhamento para grupos do Telegram com topicos."""
+import asyncio
+
+from .forwarder import send_pacing_delay
 
 
 def is_forum_chat(chat) -> bool:
@@ -88,6 +91,7 @@ async def ensure_topic_map(cli, source_chat_id, dest_chat_id, state, phone, sour
         by_title.setdefault(topic_title(item).casefold(), []).append(topic_id(item))
 
     changed = False
+    created_topics = 0
     # Todo forum possui o topico Geral (id 1), embora algumas respostas da API
     # nao o incluam na listagem paginada.
     if mapping.get('1') != 1:
@@ -107,6 +111,8 @@ async def ensure_topic_map(cli, source_chat_id, dest_chat_id, state, phone, sour
         if candidates:
             target_id = candidates.pop(0)
         else:
+            if created_topics:
+                await asyncio.sleep(send_pacing_delay())
             create_kwargs = {}
             for attr in ('icon_color', 'icon_emoji_id'):
                 value = _optional_int(getattr(source_topic, attr, None))
@@ -126,6 +132,7 @@ async def ensure_topic_map(cli, source_chat_id, dest_chat_id, state, phone, sour
                 log('Conta sem Premium; criando o topico sem icone personalizado: {}'.format(title))
                 created = await cli.create_forum_topic(dest_chat_id, title, **create_kwargs)
             target_id = topic_id(created)
+            created_topics += 1
             log('Topico criado: {} -> {}'.format(title, target_id))
         mapping[key] = target_id
         changed = True

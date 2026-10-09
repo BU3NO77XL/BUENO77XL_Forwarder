@@ -6,6 +6,7 @@ import sys
 import tempfile
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 
@@ -14,6 +15,7 @@ from telegram_forwarder.core.forum import (  # noqa: E402
     is_forum_chat,
     message_topic_id,
 )
+from telegram_forwarder.core import forum  # noqa: E402
 from telegram_forwarder.core.forwarder import State  # noqa: E402
 
 
@@ -57,15 +59,23 @@ def test_forum_detection_and_message_topic_fallbacks():
     assert message_topic_id(SimpleNamespace()) == 1
 
 
-def test_topic_map_reuses_existing_and_creates_missing_topics():
+def test_topic_map_reuses_existing_and_paces_topic_creation(monkeypatch):
     tmp = tempfile.mkdtemp()
     state = State(path=os.path.join(tmp, 'state.json'))
     cli = FakeForumClient()
+    monkeypatch.setenv('SEND_DELAY_MIN', '0.5')
+    monkeypatch.setenv('SEND_DELAY_MAX', '0.5')
+    delays = []
 
-    mapping = asyncio.run(ensure_topic_map(cli, 10, 11, state, '+1', '10', '11'))
+    async def record_sleep(delay):
+        delays.append(delay)
+
+    with patch.object(forum.asyncio, 'sleep', record_sleep):
+        mapping = asyncio.run(ensure_topic_map(cli, 10, 11, state, '+1', '10', '11'))
 
     assert mapping == {'1': 1, '19': 100, '20': 101}
     assert cli.created == [(11, 'Antigo'), (11, 'Noticias')]
+    assert delays == [0.5]
     assert state.get_topic_map_pair('+1', '10', '11') == mapping
 
 
