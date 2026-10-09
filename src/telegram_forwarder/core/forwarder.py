@@ -18,10 +18,14 @@ import os
 import json
 import random
 import asyncio
+import math
+import shutil
+import tempfile
 from datetime import datetime
 
 from pyrogram import errors
-from .paths import STATE_FILE, ensure_runtime_dirs
+from .i18n import t
+from .paths import DOWNLOADS_DIR, STATE_FILE, ensure_runtime_dirs
 
 
 def send_pacing_delay() -> float:
@@ -218,10 +222,10 @@ async def fetch_new_ids(cli, chat_id, last_id, log=print):
                 ids.append(m.id)
             break
         except errors.FloodWait as e:
-            log('FloodWait while indexing: {}s'.format(e.value))
+            log(t('l_floodwait_retry').format(e.value))
             await asyncio.sleep(e.value + random.randint(10, 35))
         except Exception as e:
-            log('Error indexing: {}'.format(e))
+            log(t('l_index_failed'))
             break
     return sorted(set(ids))
 
@@ -231,46 +235,137 @@ async def get_message_safe(cli, chat_id, message_id, log=print):
     try:
         return await cli.get_messages(chat_id, message_id)
     except errors.FloodWait as e:
-        log('FloodWait: {}'.format(e.value))
+        log(t('l_floodwait_retry').format(e.value))
         await asyncio.sleep(e.value + random.randint(10, 35))
         try:
             return await cli.get_messages(chat_id, message_id)
         except Exception:
             return None
     except Exception as e:
-        log('Error fetching {}: {}'.format(message_id, e))
+        log(t('l_message_unavailable').format(message_id))
         return None
 
 
-async def _download_safe(m, timeout=180, retries=3, log=print):
+def _media_file_size(m):
+    for media_type in ('photo', 'video', 'document', 'audio', 'animation', 'voice', 'video_note', 'sticker'):
+        media = getattr(m, media_type, None)
+        if media is None:
+            continue
+        size = getattr(media, 'file_size', None)
+        if size:
+            return int(size)
+        if media_type == 'photo':
+            sizes = getattr(media, 'sizes', ()) or ()
+            return max((getattr(item, 'file_size', 0) or 0 for item in sizes), default=0)
+    return 0
+
+
+def _download_timeout(m, base_timeout=180):
+    size = _media_file_size(m)
+    # Allow two times the transfer time at 512 KiB/s for large files.
+    size_timeout = math.ceil(size * 2 / (512 * 1024)) if size else 0
+    return max(base_timeout, size_timeout)
+
+
+def _media_extension(m):
+    fallback_extensions = {
+        'photo': '.jpg', 'video': '.mp4', 'document': '.bin', 'audio': '.mp3',
+        'animation': '.mp4', 'voice': '.ogg', 'video_note': '.mp4', 'sticker': '.webp',
+    }
+    for media_type, fallback in fallback_extensions.items():
+        media = getattr(m, media_type, None)
+        if media is not None:
+            file_name = os.path.basename(getattr(media, 'file_name', '') or '')
+            extension = os.path.splitext(file_name)[1]
+            return extension[:16] if extension else fallback
+    return '.bin'
+
+
+async def _download_safe(m, timeout=180, retries=3, log=print, download_dir=None,
+                         progress=None):
     """Baixa mídia com timeout e retry para evitar 'upload.GetFile timed out'."""
+    file_size = _media_file_size(m)
+    download_timeout = _download_timeout(m, timeout)
     for attempt in range(1, retries + 1):
         try:
             # m.download já tem retry interno, mas envolvemos com wait_for para timeout maior
-            path = await asyncio.wait_for(m.download(), timeout=timeout)
+            download_kwargs = {}
+            if download_dir:
+                os.makedirs(download_dir, exist_ok=True)
+                download_kwargs['file_name'] = os.path.join(
+                    download_dir,
+                    'message-{}-attempt-{}{}'.format(
+                        getattr(m, 'id', 'unknown'), attempt, _media_extension(m),
+                    ),
+                )
+            if progress is not None:
+                download_kwargs['progress'] = progress
+            path = await asyncio.wait_for(m.download(**download_kwargs), timeout=download_timeout)
             if path and os.path.exists(path):
                 return path
             if path is None and attempt < retries:
-                log(f"Download retornou None id={getattr(m, 'id', '?')} tentativa {attempt}/{retries}")
+                log(t('l_media_download_retry').format(
+                    getattr(m, 'id', '?'), attempt + 1, retries,
+                ))
                 await asyncio.sleep(2 * attempt)
                 continue
             if path:
                 return path
         except asyncio.TimeoutError:
-            log(f"Timeout baixando mídia id={getattr(m, 'id', '?')} tentativa {attempt}/{retries}")
+            if attempt < retries:
+                log(t('l_media_download_timeout').format(
+                    getattr(m, 'id', '?'), attempt + 1, retries,
+                ))
             await asyncio.sleep(2 * attempt)
         except Exception as e:
             # Timeout de rede do pyrogram vem como Exception com 'timed out'
             if 'timed out' in str(e).lower() and attempt < retries:
-                log(f"Retrying download id={getattr(m, 'id', '?')} ({attempt}/{retries}): {e}")
+                log(t('l_media_network_retry').format(
+                    getattr(m, 'id', '?'), attempt + 1, retries,
+                ))
                 await asyncio.sleep(3 * attempt)
                 continue
             raise
-    raise asyncio.TimeoutError(f"Falha ao baixar mídia id={getattr(m, 'id', '?')} após {retries} tentativas")
+    raise asyncio.TimeoutError(
+        t('l_media_download_failed').format(
+            getattr(m, 'id', '?'), file_size / (1024 ** 2), retries,
+        )
+    )
+
+
+async def _send_media_file(cli, m, send_method, file_arg, send_kwargs, log=print):
+    file_size = _media_file_size(m)
+    downloads_dir = str(DOWNLOADS_DIR)
+    os.makedirs(downloads_dir, exist_ok=True)
+    if file_size:
+        reserve = min(64 * 1024 ** 2, max(8 * 1024 ** 2, file_size // 20))
+        free_space = shutil.disk_usage(downloads_dir).free
+        if free_space < file_size + reserve:
+            raise OSError(
+                t('l_media_disk_space').format(
+                    getattr(m, 'id', '?'), file_size / (1024 ** 2),
+                    free_space / (1024 ** 2),
+                )
+            )
+
+    message_id = getattr(m, 'id', '?')
+    with tempfile.TemporaryDirectory(prefix='forward-', dir=downloads_dir) as temp_dir:
+        log(t('l_media_transfer_started').format(message_id, file_size / (1024 ** 2)))
+        path = await _download_safe(
+            m,
+            log=log,
+            download_dir=temp_dir,
+        )
+        if not path or not os.path.isfile(path):
+            raise OSError(t('l_media_missing_file').format(message_id))
+        await getattr(cli, send_method)(
+            **send_kwargs,
+            **{file_arg: path},
+        )
 
 
 async def send_one(cli, dest_chat_id, m, message_thread_id=None, source_chat_id=None,
-                   prefer_copy=False, copy_album=False):
+                   prefer_copy=False, copy_album=False, log=print):
     """Envia uma mensagem tratando todos os tipos de midia."""
     topic_kwargs = {} if message_thread_id is None else {'message_thread_id': message_thread_id}
     # service/empty não podem ser copiados
@@ -306,99 +401,70 @@ async def send_one(cli, dest_chat_id, m, message_thread_id=None, source_chat_id=
             **topic_kwargs,
         )
     elif m.photo:
-        path = await _download_safe(m)
-        await cli.send_photo(
-            chat_id=dest_chat_id,
-            photo=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_photo', 'photo', {
+                'chat_id': dest_chat_id,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     elif m.video:
-        path = await _download_safe(m)
-        await cli.send_video(
-            chat_id=dest_chat_id,
-            video=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            duration=m.video.duration,
-            width=m.video.width,
-            height=m.video.height,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_video', 'video', {
+                'chat_id': dest_chat_id,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                'duration': m.video.duration,
+                'width': m.video.width,
+                'height': m.video.height,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     elif m.document:
-        path = await _download_safe(m)
-        await cli.send_document(
-            chat_id=dest_chat_id,
-            document=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_document', 'document', {
+                'chat_id': dest_chat_id,
+                'file_name': m.document.file_name,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     elif m.audio:
-        path = await _download_safe(m)
-        await cli.send_audio(
-            chat_id=dest_chat_id,
-            audio=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            duration=m.audio.duration,
-            performer=m.audio.performer,
-            title=m.audio.title,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_audio', 'audio', {
+                'chat_id': dest_chat_id,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                'duration': m.audio.duration,
+                'performer': m.audio.performer,
+                'title': m.audio.title,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     elif m.animation:
-        path = await _download_safe(m)
-        await cli.send_animation(
-            chat_id=dest_chat_id,
-            animation=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            duration=m.animation.duration,
-            width=m.animation.width,
-            height=m.animation.height,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_animation', 'animation', {
+                'chat_id': dest_chat_id,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                'duration': m.animation.duration,
+                'width': m.animation.width,
+                'height': m.animation.height,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     elif m.voice:
-        path = await _download_safe(m)
-        await cli.send_voice(
-            chat_id=dest_chat_id,
-            voice=path,
-            caption=m.caption,
-            caption_entities=m.caption_entities,
-            duration=m.voice.duration,
-            **topic_kwargs,
+        await _send_media_file(
+            cli, m, 'send_voice', 'voice', {
+                'chat_id': dest_chat_id,
+                'caption': m.caption,
+                'caption_entities': m.caption_entities,
+                'duration': m.voice.duration,
+                **topic_kwargs,
+            }, log=log,
         )
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
     else:
         copy_kwargs = {} if message_thread_id is None else {
             'reply_to_message_id': message_thread_id,
@@ -413,20 +479,22 @@ async def send_with_retry(cli, dest_chat_id, m, log=print, message_thread_id=Non
         await send_one(
             cli, dest_chat_id, m, message_thread_id=message_thread_id,
             source_chat_id=source_chat_id, prefer_copy=prefer_copy, copy_album=copy_album,
+            log=log,
         )
         return True
     except errors.FloodWait as e:
-        log('FloodWait: {}'.format(e.value))
+        log(t('l_floodwait_retry').format(e.value))
         await asyncio.sleep(e.value + random.randint(10, 35))
         try:
             await send_one(
                 cli, dest_chat_id, m, message_thread_id=message_thread_id,
                 source_chat_id=source_chat_id, prefer_copy=prefer_copy, copy_album=copy_album,
+                log=log,
             )
             return True
-        except Exception as e2:
-            log('Error sending [{}]: {}'.format(getattr(m, 'id', '?'), e2))
+        except Exception:
+            log(t('l_floodwait_failed').format(getattr(m, 'id', '?')))
             return False
     except Exception as e:
-        log('Error sending [{}]: {}'.format(getattr(m, 'id', '?'), e))
+        log(t('l_send_failed').format(getattr(m, 'id', '?')))
         return False
